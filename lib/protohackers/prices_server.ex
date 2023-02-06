@@ -1,5 +1,7 @@
-defmodule Protohackers.PrimeServer do
+defmodule Protohackers.PricesServer do
   use GenServer
+
+  alias Protohackers.PricesServer.DB
 
   require Logger
 
@@ -17,14 +19,12 @@ defmodule Protohackers.PrimeServer do
       mode: :binary,
       active: false,
       reuseaddr: true,
-      exit_on_close: false,
-      packet: :line,
-      buffer: 1024 * 100
+      exit_on_close: false
     ]
 
-    case :gen_tcp.listen(5002, listen_options) do
+    case :gen_tcp.listen(5003, listen_options) do
       {:ok, listen_socket} ->
-        Logger.info("Starting prime server on port 5002")
+        Logger.info("Starting prices server on port 5003")
         state = %__MODULE__{listen_socket: listen_socket, supervisor: supervisor}
         {:ok, state, {:continue, :accept}}
 
@@ -46,7 +46,7 @@ defmodule Protohackers.PrimeServer do
   end
 
   def handle_connection(socket) do
-    case echo_lines_until_closed(socket) do
+    case handle_requests(socket, DB.new()) do
       :ok -> :ok
       {:error, reason} -> Logger.error("Failed to receive data: #{inspect(reason)}")
     end
@@ -54,32 +54,34 @@ defmodule Protohackers.PrimeServer do
     :gen_tcp.close(socket)
   end
 
-  def echo_lines_until_closed(socket) do
-    case :gen_tcp.recv(socket, 0, 10_000) do
-      {:ok, data} ->
-        case Jason.decode(data) do
-          {:ok, %{"method" => "isPrime", "number" => number}} when is_number(number) ->
-            # Logger.debug("Received valid request for number: #{number}")
-            response = %{"method" => "isPrime", "prime" => prime?(number)}
-            :gen_tcp.send(socket, [Jason.encode!(response), ?\n])
-            echo_lines_until_closed(socket)
-
-          other ->
-            Logger.debug("Received invalid request: #{inspect(other)}")
-            :gen_tcp.send(socket, "malformed request\n")
+  def handle_requests(socket, db) do
+    case :gen_tcp.recv(socket, 9, 10_000) do
+      {:ok, data} when byte_size(data) == 9 ->
+        case handle_request(data, db) do
+          {nil, db} ->
+            handle_requests(socket, db)
+          {response, db} ->
+            :gen_tcp.send(socket, response)
+            handle_requests(socket, db)
+          :error ->
             {:error, :invalid_request}
         end
       {:error, :closed} -> :ok
-      {:error, :timeout} -> :ok
+      {:error, :timeout} -> handle_requests(socket, db)
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp prime?(number) when is_float(number), do: false
-  defp prime?(number) when number <= 1, do: false
-  defp prime?(number) when number in [2, 3], do: true
+  defp handle_request(<<?I, timestamp::32-signed-big, price::32-signed-big>>, db) do
+    {nil, DB.add(db, timestamp, price)}
+  end
 
-  defp prime?(number) do
-    not Enum.any?(2..trunc(:math.sqrt(number)), &(rem(number, &1) == 0))
+  defp handle_request(<<?Q, mintime::32-signed-big, maxtime::32-signed-big>>, db) do
+    avg = DB.query(db, mintime, maxtime)
+    {<<avg::32-signed-big>>, db}
+  end
+
+  defp handle_request(_other, _db) do
+    :error
   end
 end
