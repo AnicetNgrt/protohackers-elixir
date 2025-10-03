@@ -1,5 +1,5 @@
 # Protohackers
 
-Following [the serie by Andrea Leopardi](https://www.youtube.com/playlist?list=PLd7I3U4fDsULTLqbRAkWzA002-IzMe8fl).
+Elixir implementation of the Protohackers challenges.
 
-Made with Elixir and hosted on *fly.io*
+Based on [Andrea Leopardi's series](https://www.youtube.com/playlist?list=PLd7I3U4fDsULTLqbRAkWzA002-IzMe8fl) • Hosted on fly.io
